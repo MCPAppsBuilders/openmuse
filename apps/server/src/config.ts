@@ -44,6 +44,7 @@ export interface Config {
   agentUrl?: string;
   agentToken?: string;
   intelligenceApiKey?: string;
+  threadBackend?: "local" | "intelligence";
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
@@ -77,9 +78,13 @@ export function required(name: string, message: string, value = process.env[name
   return value.trim();
 }
 
-export function assertApiDeploymentConfig(
-  config: Config,
-): asserts config is Config & { intelligenceApiKey: string } {
+export function assertApiDeploymentConfig(config: Config): void {
+  if (
+    config.threadBackend !== undefined &&
+    !["local", "intelligence"].includes(config.threadBackend)
+  )
+    throw new Error("THREAD_BACKEND must be local or intelligence");
+  if (config.threadBackend !== "intelligence") return;
   required(
     "CPK_INTELLIGENCE_API_KEY",
     intelligenceKeyRequiredMessage,
@@ -103,6 +108,9 @@ export function browserWorkerUrl(value?: string): string | undefined {
 // reviewed, idempotency-keyed actions.
 export const MODEL_MAX_RETRIES = 2;
 export function readConfig(): Config {
+  const threadBackend = process.env.THREAD_BACKEND ?? "local";
+  if (threadBackend !== "local" && threadBackend !== "intelligence")
+    throw new Error("THREAD_BACKEND must be local or intelligence");
   const mode = process.env.WORKSPACE_MODE ?? "sample";
   if (mode !== "sample" && mode !== "live")
     throw new Error("WORKSPACE_MODE must be sample or live");
@@ -149,7 +157,8 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
-    intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
+    threadBackend,
+    intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY?.trim(),
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
@@ -170,6 +179,7 @@ export function readConfig(): Config {
     // behind a proxy that sets them; otherwise a direct caller can spoof them.
     trustProxy: process.env.TRUST_PROXY === "true",
   };
+  assertApiDeploymentConfig(config);
   if (
     mode === "live" &&
     (!config.accessKey || config.accessKey.length < 24 || !config.encryptionKey)

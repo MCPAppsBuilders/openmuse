@@ -9,17 +9,17 @@ const db = await createStore({
   databaseUrl: config.databaseUrl,
 });
 await db.recoverInterruptedActions();
-const { app, agent } = await createApp(db, config);
+const { app, agent, localThreads } = await createApp(db, config);
+if (config.threadBackend !== "intelligence") await localThreads.recoverInterrupted();
 if (config.taskWorkerEnabled) agent.start();
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, () =>
   console.log(`OpenMuse ${config.mode} API ready at ${config.publicUrl}`),
 );
 const shutdown = () => {
-  server.close(() => {
-    void agent
-      .stop()
-      .then(() => db.close())
-      .then(() => process.exit(0));
+  void Promise.all([agent.stop(), localThreads.stopAll()]).then(() => {
+    server.close(() => {
+      void db.close().then(() => process.exit(0));
+    });
   });
 };
 process.on("SIGINT", shutdown);

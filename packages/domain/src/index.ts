@@ -191,6 +191,7 @@ export interface Workspace {
   activity: ActivityEntry[];
   connections: Connection[];
   runtime: {
+    threadBackend?: "local" | "intelligence";
     provider: "sample" | "model" | "openbot";
     configured: boolean;
     openbotConfigured: boolean;

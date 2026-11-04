@@ -8,7 +8,11 @@ import { createStore } from "../db.ts";
 import { createDemoModel, demoModel } from "./model.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
-const intelligenceApiKey = required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage);
+const threadBackend = process.env.THREAD_BACKEND ?? "local";
+const intelligenceApiKey =
+  threadBackend === "intelligence"
+    ? required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage)
+    : "";
 const jevMode = process.env.DEMO_JEV_MODE ?? "sample";
 if (jevMode !== "sample" && jevMode !== "live")
   throw new Error("DEMO_JEV_MODE must be sample or live");
@@ -97,6 +101,7 @@ const api = spawn(
       DO_NOT_TRACK: "1",
       COPILOTKIT_TELEMETRY_DISABLED: "true",
       CPK_INTELLIGENCE_API_KEY: intelligenceApiKey,
+      THREAD_BACKEND: threadBackend,
     },
   },
 );

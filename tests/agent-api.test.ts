@@ -86,6 +86,7 @@ test("agent API requires a session and reports the actual worker state", async (
 });
 
 test("the main Rich Thread survives reopening and concurrent initialization", async (t) => {
+  server = await createApp(db, { ...config, threadBackend: "intelligence" });
   t.mock.method(
     CopilotKitIntelligence.prototype,
     "getOrCreateThread",

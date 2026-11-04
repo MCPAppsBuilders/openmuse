@@ -50,7 +50,7 @@ async function setup() {
   });
   const service = new AgentService(
     db,
-    {} as never,
+    { publicUrl: "http://localhost:8787" } as never,
     { connection: async () => ({ id: "conn-1" }) } as never,
     {} as never,
     actions,

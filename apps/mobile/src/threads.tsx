@@ -11,6 +11,7 @@ import {
 } from "lucide-react-native";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { useLocalThreads } from "./local-threads";
 import { Button, colors, ErrorNotice, Field, LinkRow, Sheet, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -112,7 +113,15 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
     start,
   } = useMuseThread();
   const { workspace, open, navigate, refresh } = useWorkspace();
-  const threads = useThreads({ agentId: "default", enabled, includeArchived: true, limit: 20 });
+  const local = workspace.runtime.threadBackend === "local";
+  const cloudThreads = useThreads({
+    agentId: "default",
+    enabled: enabled && !local,
+    includeArchived: true,
+    limit: 20,
+  });
+  const localThreads = useLocalThreads(enabled && local);
+  const threads = local ? localThreads : cloudThreads;
   const [editing, setEditing] = useState<string>();
   const [name, setName] = useState("");
   const [error, setError] = useState("");

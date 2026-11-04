@@ -41,6 +41,7 @@ import type {
 import { API_URL } from "./api";
 import { browserAddress } from "./browser-address";
 import { localDateTime, startOfZonedDay, zonedInstant } from "./date-time";
+import { ShoppingPanel } from "./shopping";
 import {
   Button,
   Card,
@@ -1252,6 +1253,7 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
   ].filter((row) => `${row.name} ${row.group}`.toLowerCase().includes(query.toLowerCase()));
   return (
     <View style={{ gap: 22 }}>
+      <ShoppingPanel />
       {[true, false].map((isConnected) => {
         const group = rows.filter((row) => row.connected === isConnected);
         if (!group.length) return null;
@@ -1362,8 +1364,14 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
                 }
               />
               <SettingsLine
-                label="Rich Threads"
-                value={w.runtime.richThreads ? "CopilotKit Intelligence" : "Not connected"}
+                label="Conversations"
+                value={
+                  w.runtime.threadBackend === "local"
+                    ? "Local storage"
+                    : w.runtime.richThreads
+                      ? "CopilotKit Intelligence"
+                      : "Not connected"
+                }
               />
               <Button
                 small

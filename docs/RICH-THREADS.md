@@ -1,5 +1,9 @@
 # CopilotKit Rich Threads and the agent computer
 
+This page describes the optional `THREAD_BACKEND=intelligence` configuration.
+The default is now `THREAD_BACKEND=local`; see [Local conversations](LOCAL_THREADS.md)
+for the independent SQL/SSE backend and its single-server operating boundary.
+
 OpenMuse uses `@copilotkit/react-native/headless` for its custom native and web interface. Chat messages, tool cards and task-linked documents render through CopilotKit's AG-UI agent and tool hooks.
 
 ## Rich Threads

@@ -32,6 +32,7 @@ import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
 import { SearchService } from "../search.ts";
+import { ShoppingService } from "../shopping.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -52,6 +53,7 @@ const terminal = new Set(["succeeded", "failed", "cancelled"]);
 export class AgentService {
   readonly worker: TaskWorker;
   readonly search: SearchService;
+  readonly shopping: ShoppingService;
   private maintenance?: ReturnType<typeof setInterval>;
   private refreshing = false;
   constructor(
@@ -64,6 +66,7 @@ export class AgentService {
     readonly computer: ComputerService = new ComputerService(db, config),
   ) {
     this.search = new SearchService(db);
+    this.shopping = new ShoppingService(db, config);
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
       settled: (owner, task) => this.publishOutcome(owner, task),
     });

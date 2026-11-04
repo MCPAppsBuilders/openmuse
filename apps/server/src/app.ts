@@ -4,6 +4,7 @@ import { MessageSchema } from "@ag-ui/core";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { z } from "zod";
 import {
@@ -24,6 +25,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { LocalThreads, threadIdentifier } from "./local-threads.ts";
 import { rateLimit } from "./rate-limit.ts";
 import { WorkspaceService } from "./workspace.ts";
 
@@ -47,8 +49,22 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
-  const runtime = makeRuntime(config, agent, auth, intelligence);
+  const intelligence =
+    config.threadBackend === "intelligence"
+      ? new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey ?? "" })
+      : undefined;
+  const localThreads = new LocalThreads(db);
+  const cloudRuntime = intelligence ? makeRuntime(config, agent, auth, intelligence) : undefined;
+  const localRuntimes = new Map<string, ReturnType<typeof makeRuntime>>();
+  const runtimeFor = (owner: string) => {
+    if (cloudRuntime) return cloudRuntime;
+    let runtime = localRuntimes.get(owner);
+    if (!runtime) {
+      runtime = makeRuntime(config, agent, auth, undefined, localThreads.runner(owner));
+      localRuntimes.set(owner, runtime);
+    }
+    return runtime;
+  };
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
   app.use("*", async (c, next) => {
@@ -130,6 +146,19 @@ export async function createApp(
       "<h1>Google is connected</h1><p>Return to OpenMuse and refresh your workspace.</p>",
     );
   });
+  app.get("/api/shopping/callback", async (c) => {
+    const state = c.req.query("state");
+    if (!state) throw new AppError("Callback shopping incomplet", 400);
+    await agent.shopping.callbackResult(
+      state,
+      c.req.query("code"),
+      getCookie(c, "openmuse_shopping_browser") ?? "",
+      Boolean(c.req.query("error")),
+    );
+    return c.html(
+      "<h1>Compte acheteur connecté</h1><p>Revenir dans OpenMuse, Apps &gt; Shopping Lab, puis Actualiser.</p>",
+    );
+  });
   app.use("/api/*", async (c, next) => {
     const signedRoute =
       /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
@@ -141,6 +170,30 @@ export async function createApp(
         : await auth.owner(c.req.header("authorization"));
     c.set("owner", owner);
     await next();
+  });
+  app.get("/api/shopping", async (c) => c.json(await agent.shopping.status(c.get("owner"), true)));
+  app.post("/api/shopping/connect", async (c) => {
+    const browser = randomUUID();
+    const result = await agent.shopping.connect(c.get("owner"), browser);
+    setCookie(c, "openmuse_shopping_browser", browser, {
+      httpOnly: true,
+      sameSite: "Lax",
+      secure: config.publicUrl.startsWith("https:"),
+      path: "/api/shopping",
+      maxAge: 600,
+    });
+    return c.json(result);
+  });
+  app.post("/api/shopping/disconnect", async (c) => {
+    await agent.shopping.disconnect(c.get("owner"));
+    return c.json({ disconnected: true });
+  });
+  app.post("/api/shopping/reviews/:id", async (c) => {
+    const body = z
+      .object({ decision: z.enum(["approve", "deny"]) })
+      .strict()
+      .parse(await c.req.json());
+    return c.json(await agent.shopping.decide(c.get("owner"), c.req.param("id"), body.decision));
   });
   app.get("/api/workspace", async (c) => {
     const [snapshot, reachable] = await Promise.all([
@@ -215,11 +268,13 @@ export async function createApp(
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
     try {
-      await intelligence.getOrCreateThread({
-        threadId: main.threadId,
-        userId: owner,
-        agentId: "default",
-      });
+      if (intelligence)
+        await intelligence.getOrCreateThread({
+          threadId: main.threadId,
+          userId: owner,
+          agentId: "default",
+        });
+      else await localThreads.ensure(owner, main.threadId);
     } catch {
       throw new AppError(
         "Main conversation is unavailable. Check the Rich Threads connection and try again.",
@@ -227,6 +282,30 @@ export async function createApp(
       );
     }
     return c.json({ threadId: main.threadId, existing: true });
+  });
+  app.get("/api/local-threads", async (c) => {
+    if (intelligence) throw new AppError("Local threads are disabled", 404);
+    const limit = z.coerce.number().int().min(1).max(100).default(20).parse(c.req.query("limit"));
+    return c.json(await localThreads.list(c.get("owner"), limit, c.req.query("cursor")));
+  });
+  app.patch("/api/local-threads/:id", async (c) => {
+    if (intelligence) throw new AppError("Local threads are disabled", 404);
+    const patch = z
+      .object({
+        name: z.string().trim().min(1).max(200).optional(),
+        archived: z.boolean().optional(),
+      })
+      .strict()
+      .parse(await c.req.json());
+    return c.json(await localThreads.update(c.get("owner"), c.req.param("id"), patch));
+  });
+  app.get("/api/local-threads/:id/events", async (c) => {
+    if (intelligence) throw new AppError("Local threads are disabled", 404);
+    const id = c.req.param("id");
+    await localThreads.get(c.get("owner"), id);
+    const after = z.coerce.number().int().min(0).default(0).parse(c.req.query("after"));
+    const entries = (await localThreads.entries(c.get("owner"), id)).filter((e) => e.seq > after);
+    return c.json({ entries, cursor: entries.at(-1)?.seq ?? after });
   });
   app.get("/api/conversation", async (c) =>
     c.json((await db.get(c.get("owner"), "conversations", "default")) ?? { messages: [] }),
@@ -335,7 +414,33 @@ export async function createApp(
         "Configure a model and provider API key, or a valid AG-UI endpoint, to start chat",
         503,
       );
-    const response = await runtime.fetch(c.req.raw);
+    if (!intelligence) {
+      // Block SDK fallback routes (including global clear) and validate ownership before
+      // any runner operation. Each owner also has its own runner and runtime instance.
+      const path = c.req.path.slice("/api/copilotkit".length);
+      if (/^\/threads|^\/memories/.test(path))
+        throw new AppError("Use local conversation endpoints", 404);
+      const match = /^\/agent\/default\/(run|connect|stop)(?:\/([^/]+))?$/.exec(path);
+      if (match) {
+        const body = match[1] === "stop" ? undefined : await c.req.raw.clone().json();
+        const id = threadIdentifier(
+          match[2] ? decodeURIComponent(match[2]) : (body?.threadId ?? ""),
+        );
+        if (match[1] === "run") {
+          const thread = await localThreads.ensure(c.get("owner"), id);
+          if (thread.archived)
+            throw new AppError("Restore this conversation before sending a message", 409);
+          if (
+            thread.running ||
+            (await localThreads.runner(c.get("owner")).isRunning({ threadId: id }))
+          )
+            throw new AppError("Thread already running", 409);
+          if ((await localThreads.entries(c.get("owner"), id)).some((e) => e.runId === body?.runId))
+            throw new AppError("This run has already been accepted", 409);
+        } else await localThreads.get(c.get("owner"), id);
+      }
+    }
+    const response = await runtimeFor(c.get("owner")).fetch(c.req.raw);
     // Runtime 1.70 emits SSE strings; a WHATWG Response body requires byte chunks.
     const encoder = new TextEncoder();
     const body = response.body?.pipeThrough(
@@ -350,5 +455,5 @@ export async function createApp(
   app.get("/", (c) =>
     c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
   );
-  return { app, auth, files, actions, workspace, agent, computer };
+  return { app, auth, files, actions, workspace, agent, computer, localThreads };
 }

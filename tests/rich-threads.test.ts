@@ -23,6 +23,7 @@ before(async () => {
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
     intelligenceApiKey: "test-project-key-never-sent",
+    threadBackend: "intelligence",
   }));
   const session = await app.request("/api/session", {
     method: "POST",

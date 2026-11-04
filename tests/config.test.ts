@@ -34,14 +34,29 @@ const missingKeyMessage =
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
 
-test("every API mode rejects a missing or blank Intelligence key", () => {
+test("explicit Intelligence mode rejects a missing or blank key", () => {
   for (const mode of [sampleConfig, liveConfig()]) {
     for (const key of [undefined, "", " \t\n"]) {
-      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
-        name: "Error",
-        message: missingKeyMessage,
-      });
+      assert.throws(
+        () =>
+          assertApiDeploymentConfig({
+            ...mode,
+            threadBackend: "intelligence",
+            intelligenceApiKey: key,
+          }),
+        {
+          name: "Error",
+          message: missingKeyMessage,
+        },
+      );
     }
+  }
+});
+
+test("local threads need no Intelligence credentials in either API mode", () => {
+  for (const config of [sampleConfig, liveConfig()]) {
+    assert.doesNotThrow(() => assertApiDeploymentConfig({ ...config, threadBackend: "local" }));
+    assert.doesNotThrow(() => assertApiDeploymentConfig(config));
   }
 });
 
